@@ -13,6 +13,7 @@ namespace Pushok;
 
 use Countable;
 use Pushok\Payload\Alert;
+use Pushok\Payload\Sound;
 
 // Polyfill for PHP 7.2
 if (!function_exists('is_countable')) {
@@ -39,10 +40,12 @@ class Payload implements \JsonSerializable
     const PAYLOAD_MUTABLE_CONTENT_KEY = 'mutable-content';
     const PAYLOAD_CATEGORY_KEY = 'category';
     const PAYLOAD_THREAD_ID_KEY = 'thread-id';
+    const PAYLOAD_URL_ARGS_KEY = 'url-args';
 
     const PAYLOAD_HTTP2_REGULAR_NOTIFICATION_MAXIMUM_SIZE = 4096;
     const PAYLOAD_HTTP2_VOIP_NOTIFICATION_MAXIMUM_SIZE = 5120;
     const PAYLOAD_BINARY_REGULAR_NOTIFICATION_MAXIMUM_SIZE = 2048;
+
 
     /**
      * The notification settings for your app on the user’s device determine whether an alert or banner is displayed.
@@ -62,7 +65,7 @@ class Payload implements \JsonSerializable
     /**
      * The name of a sound file in the app bundle or in the Library/Sounds folder of the app’s data container.
      *
-     * @var string
+     * @var Sound|string
      */
     private $sound;
 
@@ -93,6 +96,13 @@ class Payload implements \JsonSerializable
      * @var string
      */
     private $threadId;
+
+    /**
+     * Provide this key with an array value that represents the url-args for Safari notifications.
+     *
+     * @var string
+     */
+    private $urlArgs;
 
     /**
      * Payload custom values.
@@ -185,13 +195,15 @@ class Payload implements \JsonSerializable
     /**
      * Set sound.
      *
-     * @param string $value
+     * @param Sound|string $sound
      *
      * @return Payload
      */
-    public function setSound(string $value): Payload
+    public function setSound($sound): Payload
     {
-        $this->sound = $value;
+        if ($sound instanceof Sound || is_string($sound)) {
+            $this->sound = $sound;
+        }
 
         return $this;
     }
@@ -295,6 +307,30 @@ class Payload implements \JsonSerializable
     }
 
     /**
+     * Get url-args.
+     *
+     * @return array|null
+     */
+    public function getUrlArgs()
+    {
+        return $this->urlArgs;
+    }
+
+    /**
+     * Set url-args.
+     *
+     * @param array $value
+     *
+     * @return Payload
+     */
+    public function setUrlArgs(array $value): Payload
+    {
+        $this->urlArgs = $value;
+
+        return $this;
+    }
+
+    /**
      * Set custom value for Payload.
      *
      * @param string $key
@@ -359,7 +395,11 @@ class Payload implements \JsonSerializable
      */
     public function toJson(): string
     {
-        return json_encode($this, JSON_UNESCAPED_UNICODE);
+        $str = json_encode($this, JSON_UNESCAPED_UNICODE);
+
+        $this->checkPayloadSize($str);
+
+        return $str;
     }
 
     /**
@@ -380,7 +420,7 @@ class Payload implements \JsonSerializable
             $payload[self::PAYLOAD_ROOT_KEY]->{self::PAYLOAD_BADGE_KEY} = $this->badge;
         }
 
-        if (is_string($this->sound)) {
+        if ($this->sound instanceof Sound || is_string($this->sound)) {
             $payload[self::PAYLOAD_ROOT_KEY]->{self::PAYLOAD_SOUND_KEY} = $this->sound;
         }
 
@@ -400,6 +440,10 @@ class Payload implements \JsonSerializable
             $payload[self::PAYLOAD_ROOT_KEY]->{self::PAYLOAD_THREAD_ID_KEY} = $this->threadId;
         }
 
+        if (is_array($this->urlArgs)) {
+            $payload[self::PAYLOAD_ROOT_KEY]->{self::PAYLOAD_URL_ARGS_KEY} = $this->urlArgs;
+        }
+
         if (is_countable($this->customValues) && count($this->customValues)) {
             $payload = array_merge($payload, $this->customValues);
         }
@@ -415,5 +459,22 @@ class Payload implements \JsonSerializable
     private static function getDefaultPayloadStructure()
     {
         return [self::PAYLOAD_ROOT_KEY => new \stdClass];
+    }
+
+    /**
+     * @param $jsonPayload
+     * @return void
+     * @throws InvalidPayloadException
+     */
+    private function checkPayloadSize($jsonPayload)
+    {
+        $strLength = strlen($jsonPayload);
+        if ('voip' === $this->getPushType()) {
+            if ($strLength > self::PAYLOAD_HTTP2_VOIP_NOTIFICATION_MAXIMUM_SIZE) {
+                throw new InvalidPayloadException('Voip Payload size limit exceeded');
+            }
+        } elseif ($strLength > self::PAYLOAD_HTTP2_REGULAR_NOTIFICATION_MAXIMUM_SIZE) {
+            throw new InvalidPayloadException('Payload size limit exceeded');
+        }
     }
 }
